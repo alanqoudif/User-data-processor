@@ -1,411 +1,378 @@
 'use client';
 
-import { useState, useRef } from 'react';
-import { Upload, Download, FileSpreadsheet, Users, CheckCircle, AlertCircle, Loader2, X, Info, ArrowRight, Key, User } from 'lucide-react';
-import { processExcelFile, convertToCSV, downloadCSV, UserRecord, ProcessingResult } from '@/lib/excel-processor';
+import { useState, useEffect } from 'react';
+import { processExcelFile, UserData } from '@/lib/excel-processor';
+import LoginForm from '@/components/LoginForm';
+import { isAuthenticated, logout } from '@/lib/auth';
 
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [processing, setProcessing] = useState(false);
-  const [result, setResult] = useState<ProcessingResult | null>(null);
-  const [processedData, setProcessedData] = useState<UserRecord[]>([]);
-  const [showInstructionsModal, setShowInstructionsModal] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [result, setResult] = useState<UserData[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [showInstructions, setShowInstructions] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
+  const [authenticated, setAuthenticated] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = event.target.files?.[0];
-    if (selectedFile) {
-      setFile(selectedFile);
-      setResult(null);
-      setProcessedData([]);
+  // التحقق من حالة تسجيل الدخول عند تحميل الصفحة
+  useEffect(() => {
+    const checkAuth = () => {
+      setAuthenticated(isAuthenticated());
+      setLoading(false);
+    };
+    
+    checkAuth();
+  }, []);
+
+  const handleLogin = () => {
+    setAuthenticated(true);
+  };
+
+  const handleLogout = () => {
+    logout();
+    setAuthenticated(false);
+    // إعادة تعيين جميع المتغيرات
+    setFile(null);
+    setResult(null);
+    setError(null);
+    setShowInstructions(false);
+  };
+
+  const handleDrag = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === 'dragenter' || e.type === 'dragover') {
+      setDragActive(true);
+    } else if (e.type === 'dragleave') {
+      setDragActive(false);
     }
   };
 
-  const handleDragOver = (event: React.DragEvent) => {
-    event.preventDefault();
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      handleFileSelect(e.dataTransfer.files[0]);
+    }
   };
 
-  const handleDrop = (event: React.DragEvent) => {
-    event.preventDefault();
-    const droppedFile = event.dataTransfer.files[0];
-    if (droppedFile && (droppedFile.name.endsWith('.xlsx') || droppedFile.name.endsWith('.xls'))) {
-      setFile(droppedFile);
-      setResult(null);
-      setProcessedData([]);
+  const handleFileSelect = (selectedFile: File) => {
+    const validTypes = [
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-excel'
+    ];
+    
+    if (!validTypes.includes(selectedFile.type)) {
+      setError('يرجى اختيار ملف Excel صالح (.xlsx أو .xls)');
+      return;
     }
+    
+    setFile(selectedFile);
+    setError(null);
+    setResult(null);
   };
 
   const handleProcess = async () => {
     if (!file) return;
-
+    
     setProcessing(true);
+    setError(null);
+    
     try {
-      const result = await processExcelFile(file);
-      setResult(result);
-      if (result.success && result.data) {
-        // تحديث كلمات المرور لتكون himamedu1212
-        const updatedData = result.data.map(user => ({
-          ...user,
-          password: 'himamedu1212'
-        }));
-        setProcessedData(updatedData);
-      }
-    } catch (error) {
-      setResult({
-        success: false,
-        error: 'حدث خطأ غير متوقع أثناء معالجة الملف'
-      });
-    }
-    setProcessing(false);
-  };
-
-  const handleDownload = () => {
-    if (processedData.length > 0) {
-      const csvContent = convertToCSV(processedData);
-      const timestamp = new Date().toISOString().slice(0, 10);
-      downloadCSV(csvContent, `himam_users_${timestamp}.csv`);
-      
-      // عرض popup التعليمات بعد التحميل
-      setShowInstructionsModal(true);
+      const processedData = await processExcelFile(file);
+      setResult(processedData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'حدث خطأ في معالجة الملف');
+    } finally {
+      setProcessing(false);
     }
   };
 
-  const resetAll = () => {
+  const downloadCSV = () => {
+    if (!result) return;
+    
+    const csvHeader = 'username,firstname,lastname,email,password\n';
+    const csvContent = result.map(user => 
+      `${user.username},${user.firstname},${user.lastname},${user.email},${user.password}`
+    ).join('\n');
+    
+    const csvData = csvHeader + csvContent;
+    const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    
+    if (link.download !== undefined) {
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', 'himam_users.csv');
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+    
+    // عرض التعليمات بعد التحميل
+    setShowInstructions(true);
+  };
+
+  const resetForm = () => {
     setFile(null);
     setResult(null);
-    setProcessedData([]);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
+    setError(null);
+    setShowInstructions(false);
   };
 
-  // Modal للتعليمات
-  const InstructionsModal = () => {
-    if (!showInstructionsModal) return null;
-
+  // عرض شاشة التحميل
+  if (loading) {
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-        <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-          <div className="p-8">
-            {/* Header */}
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
-                  <Info className="w-6 h-6 text-blue-600" />
-                </div>
-                <div>
-                  <h2 className="text-2xl font-bold text-gray-800">كيفية رفع المستخدمين في منصة همم التعليمية</h2>
-                  <p className="text-gray-600">اتبع الخطوات التالية لإضافة المستخدمين الجدد</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowInstructionsModal(false)}
-                className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 transition-colors"
-              >
-                <X className="w-5 h-5 text-gray-500" />
-              </button>
-            </div>
-
-            {/* خطوات الرفع */}
-            <div className="space-y-6">
-              <div className="bg-blue-50 border border-blue-200 rounded-xl p-6">
-                <h3 className="text-xl font-semibold text-blue-800 mb-4 flex items-center gap-2">
-                  <User className="w-5 h-5" />
-                  خطوات رفع المستخدمين:
-                </h3>
-                <div className="space-y-4">
-                  {[
-                    { step: 1, text: "سجل دخولك بحساب الأدمن في منصة همم التعليمية" },
-                    { step: 2, text: "اذهب إلى قسم «إدارة الموقع»" },
-                    { step: 3, text: "انقر على «المستخدمون»" },
-                    { step: 4, text: "اختر «قسم رفع المستخدمين»" },
-                    { step: 5, text: "اسحب الملف المحمل وأفلته في المنطقة المكتوب فيها «تستطيع سحب وإفلات الملفات هنا لإضافتها»" },
-                    { step: 6, text: "انقر على «رفع المستخدمين»" },
-                    { step: 7, text: "تأكد من جميع بيانات المستخدمين قبل التأكيد النهائي" }
-                  ].map((item, index) => (
-                    <div key={index} className="flex items-start gap-3">
-                      <div className="w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center text-sm font-semibold flex-shrink-0">
-                        {item.step}
-                      </div>
-                      <p className="text-gray-700 pt-1">{item.text}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* معلومات كلمة المرور */}
-              <div className="bg-amber-50 border border-amber-200 rounded-xl p-6">
-                <h3 className="text-xl font-semibold text-amber-800 mb-4 flex items-center gap-2">
-                  <Key className="w-5 h-5" />
-                  معلومات مهمة عن كلمات المرور:
-                </h3>
-                <div className="space-y-3">
-                  <div className="flex items-start gap-3">
-                    <ArrowRight className="w-5 h-5 text-amber-600 mt-0.5" />
-                    <div>
-                      <p className="text-gray-700 font-medium">كلمة المرور الافتراضية لجميع المستخدمين:</p>
-                      <div className="bg-gray-100 rounded-lg p-3 mt-2 font-mono text-lg text-center">
-                        <code className="text-blue-600 font-bold">himamedu1212</code>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <ArrowRight className="w-5 h-5 text-amber-600 mt-0.5" />
-                    <p className="text-gray-700">
-                      <strong>ملاحظة:</strong> يمكن للمستخدمين تغيير كلمة المرور واسم المستخدم بأنفسهم بعد تسجيل الدخول لأول مرة
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* معلومات إضافية */}
-              <div className="bg-green-50 border border-green-200 rounded-xl p-6">
-                <h3 className="text-xl font-semibold text-green-800 mb-3">✅ تم إعداد الملف بنجاح!</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-700">
-                  <div>
-                    <p><strong>عدد المستخدمين:</strong> {processedData.length}</p>
-                    <p><strong>تنسيق الملف:</strong> CSV</p>
-                  </div>
-                  <div>
-                    <p><strong>كلمة المرور:</strong> himamedu1212</p>
-                    <p><strong>أسماء المستخدمين:</strong> فريدة ومحولة للإنجليزية</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* أزرار الإجراءات */}
-            <div className="flex gap-4 mt-8 pt-6 border-t">
-              <button
-                onClick={() => setShowInstructionsModal(false)}
-                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-semibold transition-colors"
-              >
-                فهمت، إغلاق النافذة
-              </button>
-              <button
-                onClick={() => {
-                  const csvContent = convertToCSV(processedData);
-                  const timestamp = new Date().toISOString().slice(0, 10);
-                  downloadCSV(csvContent, `himam_users_${timestamp}.csv`);
-                }}
-                className="px-6 py-3 border border-gray-300 rounded-xl font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
-              >
-                تحميل الملف مرة أخرى
-              </button>
-            </div>
-          </div>
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
+        <div className="flex items-center space-x-2">
+          <svg className="animate-spin h-8 w-8 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          <span className="text-gray-600">جاري التحميل...</span>
         </div>
       </div>
     );
-  };
+  }
+
+  // عرض صفحة تسجيل الدخول إذا لم يكن مُسجلاً
+  if (!authenticated) {
+    return <LoginForm onLogin={handleLogin} />;
+  }
 
   return (
-    <div className="container mx-auto px-4 py-8 max-w-4xl">
-      {/* Header */}
-      <div className="text-center mb-12">
-        <div className="flex justify-center items-center gap-3 mb-4">
-          <FileSpreadsheet className="w-10 h-10 text-blue-600" />
-          <h1 className="text-4xl font-bold text-gray-800">معالج بيانات المستخدمين</h1>
-        </div>
-        <p className="text-gray-600 text-lg">
-          حول ملفات Excel إلى CSV لرفعها في منصة همم التعليمية
-        </p>
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mt-6">
-          <p className="text-blue-800 font-medium">
-            🎓 أداة مخصصة لمنصة همم التعليمية - إنشاء ملفات المستخدمين بتنسيق محدد
-          </p>
-        </div>
-      </div>
-
-      {/* Upload Section */}
-      <div className="bg-white rounded-2xl shadow-lg p-8 mb-8">
-        <h2 className="text-2xl font-semibold text-gray-800 mb-6 flex items-center gap-2">
-          <Upload className="w-6 h-6 text-blue-600" />
-          رفع الملف
-        </h2>
-
-        {!file ? (
-          <div
-            className="border-2 border-dashed border-blue-300 rounded-xl p-12 text-center bg-blue-50 hover:bg-blue-100 transition-colors cursor-pointer"
-            onDragOver={handleDragOver}
-            onDrop={handleDrop}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <FileSpreadsheet className="w-16 h-16 text-blue-400 mx-auto mb-4" />
-            <p className="text-xl text-gray-700 mb-2">اسحب ملف Excel هنا أو انقر للاختيار</p>
-            <p className="text-gray-500">ملفات Excel (.xlsx, .xls) مدعومة</p>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".xlsx,.xls"
-              onChange={handleFileSelect}
-              className="hidden"
-            />
-          </div>
-        ) : (
-          <div className="bg-gray-50 rounded-xl p-6">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <FileSpreadsheet className="w-8 h-8 text-green-600" />
-                <div>
-                  <p className="font-semibold text-gray-800">{file.name}</p>
-                  <p className="text-sm text-gray-500">
-                    {(file.size / 1024 / 1024).toFixed(2)} ميجابايت
-                  </p>
-                </div>
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-8 px-4" dir="rtl">
+      <div className="max-w-4xl mx-auto">
+        {/* Header with logout */}
+        <div className="flex justify-between items-center mb-8">
+          <div className="text-center flex-1">
+            <div className="flex items-center justify-center space-x-3 mb-4">
+              <div className="h-12 w-12 flex items-center justify-center rounded-full bg-blue-600 text-white text-lg font-bold">
+                همم
               </div>
+              <h1 className="text-3xl font-bold text-gray-900">
+                أداة تحويل ملفات المستخدمين
+              </h1>
+            </div>
+            <p className="text-gray-600 text-lg">
+              منصة همم التعليمية - تحويل ملفات Excel إلى CSV
+            </p>
+          </div>
+          
+          <button
+            onClick={handleLogout}
+            className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm"
+          >
+            تسجيل خروج
+          </button>
+        </div>
+
+        {/* File Upload Section */}
+        <div className="bg-white rounded-xl shadow-lg p-8 mb-8">
+          <h2 className="text-xl font-semibold text-gray-900 mb-6">1. رفع ملف Excel</h2>
+          
+          <div
+            className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
+              dragActive 
+                ? 'border-blue-500 bg-blue-50' 
+                : 'border-gray-300 hover:border-blue-400'
+            }`}
+            onDragEnter={handleDrag}
+            onDragLeave={handleDrag}
+            onDragOver={handleDrag}
+            onDrop={handleDrop}
+          >
+            <div className="space-y-4">
+              <div className="mx-auto h-16 w-16 flex items-center justify-center rounded-full bg-blue-100">
+                <svg className="h-8 w-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                </svg>
+              </div>
+              
+              {file ? (
+                <div className="space-y-2">
+                  <p className="text-lg font-medium text-green-700">✓ تم اختيار الملف:</p>
+                  <p className="text-gray-900 font-medium">{file.name}</p>
+                  <p className="text-sm text-gray-500">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-lg text-gray-700">اسحب ملف Excel هنا أو</p>
+                  <label className="inline-block cursor-pointer bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors">
+                    اختر ملف
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept=".xlsx,.xls"
+                      onChange={(e) => e.target.files?.[0] && handleFileSelect(e.target.files[0])}
+                    />
+                  </label>
+                </div>
+              )}
+              
+              <p className="text-sm text-gray-500">
+                الأنواع المدعومة: .xlsx, .xls (حتى 10 MB)
+              </p>
+            </div>
+          </div>
+
+          {error && (
+            <div className="mt-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+              <p className="flex items-center">
+                <svg className="h-5 w-5 ml-2" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                </svg>
+                {error}
+              </p>
+            </div>
+          )}
+
+          {file && !result && (
+            <div className="mt-6">
               <button
-                onClick={resetAll}
-                className="text-red-500 hover:text-red-700 transition-colors"
+                onClick={handleProcess}
+                disabled={processing}
+                className="w-full bg-blue-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
-                إزالة
+                {processing ? (
+                  <div className="flex items-center justify-center">
+                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    جاري المعالجة...
+                  </div>
+                ) : (
+                  'معالجة الملف وتحويله'
+                )}
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Results Section */}
+        {result && (
+          <div className="bg-white rounded-xl shadow-lg p-8 mb-8">
+            <h2 className="text-xl font-semibold text-gray-900 mb-6">2. نتائج التحويل</h2>
+            
+            <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg mb-6">
+              <p className="flex items-center">
+                <svg className="h-5 w-5 ml-2" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                </svg>
+                تم تحويل {result.length} مستخدم بنجاح
+              </p>
+            </div>
+
+            <div className="overflow-x-auto mb-6">
+              <table className="min-w-full bg-white border border-gray-200 rounded-lg">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 border-b text-right text-sm font-medium text-gray-700">اسم المستخدم</th>
+                    <th className="px-4 py-3 border-b text-right text-sm font-medium text-gray-700">الاسم الأول</th>
+                    <th className="px-4 py-3 border-b text-right text-sm font-medium text-gray-700">الاسم الأخير</th>
+                    <th className="px-4 py-3 border-b text-right text-sm font-medium text-gray-700">البريد الإلكتروني</th>
+                    <th className="px-4 py-3 border-b text-right text-sm font-medium text-gray-700">كلمة المرور</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.slice(0, 5).map((user, index) => (
+                    <tr key={index} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 border-b text-sm text-gray-900">{user.username}</td>
+                      <td className="px-4 py-3 border-b text-sm text-gray-900">{user.firstname}</td>
+                      <td className="px-4 py-3 border-b text-sm text-gray-900">{user.lastname}</td>
+                      <td className="px-4 py-3 border-b text-sm text-gray-900">{user.email}</td>
+                      <td className="px-4 py-3 border-b text-sm text-gray-900 font-mono">{user.password}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {result.length > 5 && (
+              <p className="text-sm text-gray-600 mb-4">
+                عرض أول 5 صفوف من {result.length} صف
+              </p>
+            )}
+
+            <div className="flex gap-4">
+              <button
+                onClick={downloadCSV}
+                className="flex-1 bg-green-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-green-700 transition-colors"
+              >
+                تحميل ملف CSV
+              </button>
+              <button
+                onClick={resetForm}
+                className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                ملف جديد
               </button>
             </div>
           </div>
         )}
 
-        {file && !processing && !result && (
-          <div className="mt-6 text-center">
-            <button
-              onClick={handleProcess}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-xl font-semibold transition-colors flex items-center gap-2 mx-auto"
-            >
-              <Users className="w-5 h-5" />
-              معالجة الملف
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Processing Status */}
-      {processing && (
-        <div className="bg-white rounded-2xl shadow-lg p-8 mb-8">
-          <div className="text-center">
-            <Loader2 className="w-12 h-12 text-blue-600 animate-spin mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-gray-800 mb-2">جاري معالجة الملف...</h3>
-            <p className="text-gray-600">يرجى الانتظار أثناء تحليل البيانات وإعداد كلمات المرور</p>
-          </div>
-        </div>
-      )}
-
-      {/* Results */}
-      {result && (
-        <div className="bg-white rounded-2xl shadow-lg p-8 mb-8">
-          {result.success ? (
-            <div>
-              <div className="flex items-center gap-3 mb-6">
-                <CheckCircle className="w-8 h-8 text-green-600" />
-                <h3 className="text-2xl font-semibold text-gray-800">تمت المعالجة بنجاح!</h3>
+        {/* Instructions Modal */}
+        {showInstructions && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="p-6 border-b border-gray-200">
+                <h3 className="text-xl font-semibold text-gray-900">
+                  خطوات رفع المستخدمين لمنصة همم
+                </h3>
               </div>
               
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-                <div className="bg-blue-50 rounded-xl p-4 text-center">
-                  <p className="text-2xl font-bold text-blue-600">{result.originalRowCount}</p>
-                  <p className="text-gray-600">الصفوف الأصلية</p>
+              <div className="p-6 space-y-4">
+                <div className="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-3 rounded-lg">
+                  <p className="font-medium">تم تحميل ملف himam_users.csv بنجاح!</p>
                 </div>
-                <div className="bg-green-50 rounded-xl p-4 text-center">
-                  <p className="text-2xl font-bold text-green-600">{result.processedRowCount}</p>
-                  <p className="text-gray-600">المستخدمين المعالجين</p>
+
+                <div className="space-y-3">
+                  <h4 className="font-semibold text-gray-900">لرفع المستخدمين إلى منصة همم:</h4>
+                  <ol className="list-decimal list-inside space-y-2 text-gray-700">
+                    <li>سجل دخول إلى لوحة تحكم منصة همم</li>
+                    <li>اذهب إلى <strong>"إدارة الموقع"</strong></li>
+                    <li>اختر <strong>"المستخدمون"</strong></li>
+                    <li>انقر على <strong>"رفع مستخدمين"</strong></li>
+                    <li>ارفع ملف <code>himam_users.csv</code> الذي حمّلته الآن</li>
+                    <li>تأكد من مطابقة الأعمدة: username, firstname, lastname, email, password</li>
+                    <li>انقر <strong>"استيراد"</strong> لإضافة المستخدمين</li>
+                  </ol>
                 </div>
-                <div className="bg-purple-50 rounded-xl p-4 text-center">
-                  <p className="text-lg font-bold text-purple-600">himamedu1212</p>
-                  <p className="text-gray-600">كلمة المرور الموحدة</p>
-                </div>
-                <div className="bg-amber-50 rounded-xl p-4 text-center">
-                  <p className="text-2xl font-bold text-amber-600">CSV</p>
-                  <p className="text-gray-600">التنسيق الناتج</p>
+
+                <div className="bg-yellow-50 border border-yellow-200 text-yellow-700 px-4 py-3 rounded-lg">
+                  <p className="font-medium">ملاحظات مهمة:</p>
+                  <ul className="list-disc list-inside space-y-1 text-sm mt-2">
+                    <li>كلمة المرور الموحدة لجميع المستخدمين: <code className="bg-yellow-100 px-1 rounded">himamedu1212</code></li>
+                    <li>يمكن للمستخدمين تغيير كلمة المرور وأسماء المستخدمين لاحقاً</li>
+                    <li>تأكد من صحة عناوين البريد الإلكتروني قبل الرفع</li>
+                  </ul>
                 </div>
               </div>
 
-              <div className="text-center">
+              <div className="p-6 border-t border-gray-200">
                 <button
-                  onClick={handleDownload}
-                  className="bg-green-600 hover:bg-green-700 text-white px-8 py-3 rounded-xl font-semibold transition-colors flex items-center gap-2 mx-auto"
+                  onClick={() => setShowInstructions(false)}
+                  className="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors"
                 >
-                  <Download className="w-5 h-5" />
-                  تحميل ملف CSV للمنصة
+                  فهمت، إغلاق
                 </button>
               </div>
             </div>
-          ) : (
-            <div>
-              <div className="flex items-center gap-3 mb-4">
-                <AlertCircle className="w-8 h-8 text-red-600" />
-                <h3 className="text-2xl font-semibold text-gray-800">خطأ في المعالجة</h3>
-              </div>
-              <div className="bg-red-50 rounded-xl p-4">
-                <p className="text-red-700">{result.error}</p>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Preview Table */}
-      {processedData.length > 0 && (
-        <div className="bg-white rounded-2xl shadow-lg p-8">
-          <h3 className="text-2xl font-semibold text-gray-800 mb-6">معاينة البيانات</h3>
-          <div className="overflow-x-auto">
-            <table className="w-full table-auto ltr">
-              <thead>
-                <tr className="bg-gray-50">
-                  <th className="px-4 py-3 text-left font-semibold">Username</th>
-                  <th className="px-4 py-3 text-left font-semibold">First Name</th>
-                  <th className="px-4 py-3 text-left font-semibold">Last Name</th>
-                  <th className="px-4 py-3 text-left font-semibold">Email</th>
-                  <th className="px-4 py-3 text-left font-semibold">Password</th>
-                </tr>
-              </thead>
-              <tbody>
-                {processedData.slice(0, 10).map((user, index) => (
-                  <tr key={index} className="border-t">
-                    <td className="px-4 py-3 font-mono text-sm">{user.username}</td>
-                    <td className="px-4 py-3">{user.firstname}</td>
-                    <td className="px-4 py-3">{user.lastname}</td>
-                    <td className="px-4 py-3 font-mono text-sm">{user.email}</td>
-                    <td className="px-4 py-3 font-mono text-sm text-blue-600 font-semibold">{user.password}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {processedData.length > 10 && (
-              <p className="text-center text-gray-500 mt-4">
-                ... وعرض أول 10 سجلات من أصل {processedData.length} سجل
-              </p>
-            )}
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Instructions */}
-      <div className="bg-white rounded-2xl shadow-lg p-8 mt-8">
-        <h3 className="text-2xl font-semibold text-gray-800 mb-6">كيفية الاستخدام</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <h4 className="font-semibold text-gray-800 mb-3">الخطوات:</h4>
-            <ol className="list-decimal list-inside space-y-2 text-gray-600">
-              <li>ارفع ملف Excel يحتوي على بيانات المستخدمين</li>
-              <li>انقر على "معالجة الملف" لتحليل البيانات</li>
-              <li>راجع النتائج والمعاينة</li>
-              <li>حمل ملف CSV المجهز لمنصة همم</li>
-              <li>اتبع التعليمات لرفع الملف في المنصة</li>
-            </ol>
-          </div>
-          <div>
-            <h4 className="font-semibold text-gray-800 mb-3">التنسيق الناتج:</h4>
-            <ul className="space-y-2 text-gray-600">
-              <li>• <strong>username:</strong> اسم المستخدم (مُحول من العربية للإنجليزية)</li>
-              <li>• <strong>firstname:</strong> الاسم الأول</li>
-              <li>• <strong>lastname:</strong> الاسم الأخير</li>
-              <li>• <strong>email:</strong> البريد الإلكتروني</li>
-              <li>• <strong>password:</strong> himamedu1212 (موحدة لجميع المستخدمين)</li>
-            </ul>
+        {/* Security Notice */}
+        <div className="text-center">
+          <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg text-sm inline-block">
+            <strong>محمي بنظام أمان:</strong> هذه الأداة متاحة فقط لإدارة منصة همم التعليمية
           </div>
         </div>
       </div>
-
-      {/* Modal للتعليمات */}
-      <InstructionsModal />
     </div>
   );
 } 

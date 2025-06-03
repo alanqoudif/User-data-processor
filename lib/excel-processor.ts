@@ -9,6 +9,15 @@ export interface UserRecord {
   password: string;
 }
 
+// تصدير نفس نوع البيانات باسم مختلف للتوافق
+export interface UserData {
+  username: string;
+  firstname: string;
+  lastname: string;
+  email: string;
+  password: string;
+}
+
 export interface ProcessingResult {
   success: boolean;
   data?: UserRecord[];
@@ -79,8 +88,9 @@ function detectColumns(headers: string[]): { [key: string]: number } {
   return columnMap;
 }
 
-export function processExcelFile(file: File): Promise<ProcessingResult> {
-  return new Promise((resolve) => {
+// وظيفة معالجة ملف Excel
+export async function processExcelFile(file: File): Promise<UserData[]> {
+  return new Promise((resolve, reject) => {
     const reader = new FileReader();
     
     reader.onload = (e) => {
@@ -96,10 +106,7 @@ export function processExcelFile(file: File): Promise<ProcessingResult> {
         const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
         
         if (jsonData.length < 2) {
-          resolve({
-            success: false,
-            error: 'الملف يجب أن يحتوي على صف رؤوس وصف بيانات واحد على الأقل'
-          });
+          reject(new Error('الملف يجب أن يحتوي على صف رؤوس وصف بيانات واحد على الأقل'));
           return;
         }
         
@@ -110,7 +117,7 @@ export function processExcelFile(file: File): Promise<ProcessingResult> {
         const columnMap = detectColumns(headers);
         
         const existingUsernames = new Set<string>();
-        const processedData: UserRecord[] = [];
+        const processedData: UserData[] = [];
         
         rows.forEach((row, index) => {
           // تخطي الصفوف الفارغة
@@ -159,7 +166,6 @@ export function processExcelFile(file: File): Promise<ProcessingResult> {
           }
           
           // استخدام كلمة المرور الافتراضية لمنصة همم التعليمية
-          // إذا لم تكن موجودة أو فارغة، استخدم الافتراضية
           if (!password) {
             password = DEFAULT_PASSWORD;
           }
@@ -177,70 +183,50 @@ export function processExcelFile(file: File): Promise<ProcessingResult> {
           });
         });
         
-        resolve({
-          success: true,
-          data: processedData,
-          originalRowCount: rows.length,
-          processedRowCount: processedData.length
-        });
+        resolve(processedData);
         
       } catch (error) {
-        resolve({
-          success: false,
-          error: `خطأ في معالجة الملف: ${error instanceof Error ? error.message : 'خطأ غير معروف'}`
-        });
+        reject(new Error(`خطأ في معالجة الملف: ${error instanceof Error ? error.message : 'خطأ غير معروف'}`));
       }
     };
     
     reader.onerror = () => {
-      resolve({
-        success: false,
-        error: 'خطأ في قراءة الملف'
-      });
+      reject(new Error('خطأ في قراءة الملف'));
     };
-    
+
     reader.readAsArrayBuffer(file);
   });
 }
 
 export function convertToCSV(data: UserRecord[]): string {
-  // إنشاء صف الرؤوس
   const headers = ['username', 'firstname', 'lastname', 'email', 'password'];
+  const csvRows = [headers.join(',')];
   
-  // تحويل البيانات إلى صفوف CSV
-  const rows = data.map(record => [
-    record.username,
-    record.firstname,
-    record.lastname,
-    record.email,
-    record.password
-  ]);
+  data.forEach(user => {
+    const row = [
+      user.username,
+      user.firstname,
+      user.lastname,
+      user.email,
+      user.password
+    ];
+    csvRows.push(row.join(','));
+  });
   
-  // دمج الرؤوس والبيانات
-  const allRows = [headers, ...rows];
-  
-  // تحويل إلى CSV
-  return allRows.map(row => 
-    row.map(field => {
-      // إضافة علامات اقتباس إذا كان الحقل يحتوي على فاصلة أو سطر جديد
-      if (field.includes(',') || field.includes('\n') || field.includes('"')) {
-        return `"${field.replace(/"/g, '""')}"`;
-      }
-      return field;
-    }).join(',')
-  ).join('\n');
+  return csvRows.join('\n');
 }
 
 export function downloadCSV(csvContent: string, filename: string = 'himam_users.csv') {
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
   const link = document.createElement('a');
-  const url = URL.createObjectURL(blob);
   
-  link.setAttribute('href', url);
-  link.setAttribute('download', filename);
-  link.style.visibility = 'hidden';
-  
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
+  if (link.download !== undefined) {
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
 } 
